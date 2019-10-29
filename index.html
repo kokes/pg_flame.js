@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-98368126-4"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'UA-98368126-4');
+    </script>
+
+    <meta charset='utf-8' />
+        <title>pg_flame.js</title>
+
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/spiermar/d3-flame-graph@2.0.3/dist/d3-flamegraph.css">
+    <script type="text/javascript" src="https://d3js.org/d3.v4.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/d3-tip/0.9.1/d3-tip.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/spiermar/d3-flame-graph@2.0.3/dist/d3-flamegraph.min.js"></script>
+
+    <style type='text/css'>
+        body {
+            font: 1.2em Arial, sans-serif;
+            color: black;
+            background-color: white;
+        }
+        div#content {
+            max-width: 800px;
+            text-align: center;
+            padding-top: 2em;
+            margin: 0 auto;
+        }
+        div#instructions {
+            text-align: left;
+        }
+        div#instructions h1 {
+            margin: 0;
+        }
+        textarea#plan-raw {
+            width: 90%;
+            height: 10em;
+            margin: 1em 0;
+        }
+        div#plan-node-details {
+            margin-top: 2em;
+            text-align: left;
+            column-count: 2;
+            /*height: 30em;*/
+        }
+        div#plan-node-details table {
+            width: 90%;
+            margin: 0 auto;
+            font-size: .8em;
+        }
+        div#plan-node-details table td, div#plan-node-details table th {
+            padding: .3em .5em;
+        }
+        div#plan-node-details table th {
+            width: 50%;
+        }
+        div#plan-node-details table tr:nth-child(odd) td, div#plan-node-details table tr:nth-child(odd) th {
+            background: #eee;
+        }
+    </style>
+
+</head>
+<body>
+<a href="https://github.com/kokes/pg_flame.js"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://camo.githubusercontent.com/a6677b08c955af8400f44c6298f40e7d19cc5b2d/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677261795f3664366436642e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_gray_6d6d6d.png"></a>
+
+<div id='content'>
+    <div id='instructions'>
+        <h1>Postgres plan flame graph</h1>
+        <div id='instructions-text'>
+        <p>
+            This tool will create a <a href='http://www.brendangregg.com/flamegraphs.html'>flame graph</a> from your Postgres execution plan. <strong>Don't worry, not data about your query is sent to any remote server, everything is computed locally.</strong> Feel free to check this using your browser's developer tools. Or just switch off internet access.
+        </p>
+
+        <p>
+            The way you obtain this plan is by prepending your query with <code>explain (analyze, format json)</code>, so e.g.
+
+            <pre><code>
+                EXPLAIN (ANALYZE, FORMAT JSON)
+                SELECT foo, bar
+                FROM bak
+                INNER JOIN foobar USING(bar)
+            </code></pre>
+        </p>
+
+        <p>
+            If you don't have a query plan at hand, try <a href='' id='example'>this example</a>
+        </p>
+        </div>
+
+    </div>
+    <textarea id='plan-raw'></textarea>
+
+    <div id='plan-rendered'></div>
+
+    <div id='plan-node-details'>
+    </div>
+</div>
+
+<script type='text/javascript'>
+
+    const planCode = document.getElementById('plan-raw');
+    const render = (x) => renderPlan(JSON.parse(x.target.value));
+    planCode.addEventListener('keyup', render);
+    planCode.addEventListener('change', render);
+
+    const exampleLink = document.getElementById('example');
+    exampleLink.addEventListener('click', (x) => {
+        x.preventDefault();
+        const plan = 'WwogIHsKICAgICJQbGFuIjogewogICAgICAiTm9kZSBUeXBlIjogIk5lc3RlZCBMb29wIiwKICAgICAgIlBhcmFsbGVsIEF3YXJlIjogZmFsc2UsCiAgICAgICJKb2luIFR5cGUiOiAiSW5uZXIiLAogICAgICAiU3RhcnR1cCBDb3N0IjogNDEuNjcsCiAgICAgICJUb3RhbCBDb3N0IjogODA1Ljk2LAogICAgICAiUGxhbiBSb3dzIjogMTMsCiAgICAgICJQbGFuIFdpZHRoIjogMTg3LAogICAgICAiQWN0dWFsIFN0YXJ0dXAgVGltZSI6IDAuMjMxLAogICAgICAiQWN0dWFsIFRvdGFsIFRpbWUiOiA4LjQzMCwKICAgICAgIkFjdHVhbCBSb3dzIjogMjEzLAogICAgICAiQWN0dWFsIExvb3BzIjogMSwKICAgICAgIklubmVyIFVuaXF1ZSI6IHRydWUsCiAgICAgICJQbGFucyI6IFsKICAgICAgICB7CiAgICAgICAgICAiTm9kZSBUeXBlIjogIkhhc2ggSm9pbiIsCiAgICAgICAgICAiUGFyZW50IFJlbGF0aW9uc2hpcCI6ICJPdXRlciIsCiAgICAgICAgICAiUGFyYWxsZWwgQXdhcmUiOiBmYWxzZSwKICAgICAgICAgICJKb2luIFR5cGUiOiAiSW5uZXIiLAogICAgICAgICAgIlN0YXJ0dXAgQ29zdCI6IDQxLjM5LAogICAgICAgICAgIlRvdGFsIENvc3QiOiA4MDEuOTEsCiAgICAgICAgICAiUGxhbiBSb3dzIjogMTMsCiAgICAgICAgICAiUGxhbiBXaWR0aCI6IDE0NywKICAgICAgICAgICJBY3R1YWwgU3RhcnR1cCBUaW1lIjogMC4yMjQsCiAgICAgICAgICAiQWN0dWFsIFRvdGFsIFRpbWUiOiA3Ljk3MCwKICAgICAgICAgICJBY3R1YWwgUm93cyI6IDIxMywKICAgICAgICAgICJBY3R1YWwgTG9vcHMiOiAxLAogICAgICAgICAgIklubmVyIFVuaXF1ZSI6IHRydWUsCiAgICAgICAgICAiSGFzaCBDb25kIjogIih6YS5pZF9vZiA9IG9yZy5pZF9vcmdhbikiLAogICAgICAgICAgIlBsYW5zIjogWwogICAgICAgICAgICB7CiAgICAgICAgICAgICAgIk5vZGUgVHlwZSI6ICJTZXEgU2NhbiIsCiAgICAgICAgICAgICAgIlBhcmVudCBSZWxhdGlvbnNoaXAiOiAiT3V0ZXIiLAogICAgICAgICAgICAgICJQYXJhbGxlbCBBd2FyZSI6IGZhbHNlLAogICAgICAgICAgICAgICJSZWxhdGlvbiBOYW1lIjogInBvc2xhbmNpX3phcmF6ZW5pIiwKICAgICAgICAgICAgICAiQWxpYXMiOiAiemEiLAogICAgICAgICAgICAgICJTdGFydHVwIENvc3QiOiAwLjAwLAogICAgICAgICAgICAgICJUb3RhbCBDb3N0IjogNjgxLjg1LAogICAgICAgICAgICAgICJQbGFuIFJvd3MiOiAyOTkxNCwKICAgICAgICAgICAgICAiUGxhbiBXaWR0aCI6IDM2LAogICAgICAgICAgICAgICJBY3R1YWwgU3RhcnR1cCBUaW1lIjogMC4wMDksCiAgICAgICAgICAgICAgIkFjdHVhbCBUb3RhbCBUaW1lIjogNS4xMTUsCiAgICAgICAgICAgICAgIkFjdHVhbCBSb3dzIjogMjk5MTYsCiAgICAgICAgICAgICAgIkFjdHVhbCBMb29wcyI6IDEsCiAgICAgICAgICAgICAgIkZpbHRlciI6ICIoY2xfZnVua2NlID0gMCkiLAogICAgICAgICAgICAgICJSb3dzIFJlbW92ZWQgYnkgRmlsdGVyIjogNDU1MgogICAgICAgICAgICB9LAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgIk5vZGUgVHlwZSI6ICJIYXNoIiwKICAgICAgICAgICAgICAiUGFyZW50IFJlbGF0aW9uc2hpcCI6ICJJbm5lciIsCiAgICAgICAgICAgICAgIlBhcmFsbGVsIEF3YXJlIjogZmFsc2UsCiAgICAgICAgICAgICAgIlN0YXJ0dXAgQ29zdCI6IDQxLjM4LAogICAgICAgICAgICAgICJUb3RhbCBDb3N0IjogNDEuMzgsCiAgICAgICAgICAgICAgIlBsYW4gUm93cyI6IDEsCiAgICAgICAgICAgICAgIlBsYW4gV2lkdGgiOiAxMTEsCiAgICAgICAgICAgICAgIkFjdHVhbCBTdGFydHVwIFRpbWUiOiAwLjE5OCwKICAgICAgICAgICAgICAiQWN0dWFsIFRvdGFsIFRpbWUiOiAwLjE5OCwKICAgICAgICAgICAgICAiQWN0dWFsIFJvd3MiOiAxLAogICAgICAgICAgICAgICJBY3R1YWwgTG9vcHMiOiAxLAogICAgICAgICAgICAgICJIYXNoIEJ1Y2tldHMiOiAxMDI0LAogICAgICAgICAgICAgICJPcmlnaW5hbCBIYXNoIEJ1Y2tldHMiOiAxMDI0LAogICAgICAgICAgICAgICJIYXNoIEJhdGNoZXMiOiAxLAogICAgICAgICAgICAgICJPcmlnaW5hbCBIYXNoIEJhdGNoZXMiOiAxLAogICAgICAgICAgICAgICJQZWFrIE1lbW9yeSBVc2FnZSI6IDksCiAgICAgICAgICAgICAgIlBsYW5zIjogWwogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAiTm9kZSBUeXBlIjogIlNlcSBTY2FuIiwKICAgICAgICAgICAgICAgICAgIlBhcmVudCBSZWxhdGlvbnNoaXAiOiAiT3V0ZXIiLAogICAgICAgICAgICAgICAgICAiUGFyYWxsZWwgQXdhcmUiOiBmYWxzZSwKICAgICAgICAgICAgICAgICAgIlJlbGF0aW9uIE5hbWUiOiAicG9zbGFuY2lfb3JnYW55IiwKICAgICAgICAgICAgICAgICAgIkFsaWFzIjogIm9yZyIsCiAgICAgICAgICAgICAgICAgICJTdGFydHVwIENvc3QiOiAwLjAwLAogICAgICAgICAgICAgICAgICAiVG90YWwgQ29zdCI6IDQxLjM4LAogICAgICAgICAgICAgICAgICAiUGxhbiBSb3dzIjogMSwKICAgICAgICAgICAgICAgICAgIlBsYW4gV2lkdGgiOiAxMTEsCiAgICAgICAgICAgICAgICAgICJBY3R1YWwgU3RhcnR1cCBUaW1lIjogMC4xNzAsCiAgICAgICAgICAgICAgICAgICJBY3R1YWwgVG90YWwgVGltZSI6IDAuMTk2LAogICAgICAgICAgICAgICAgICAiQWN0dWFsIFJvd3MiOiAxLAogICAgICAgICAgICAgICAgICAiQWN0dWFsIExvb3BzIjogMSwKICAgICAgICAgICAgICAgICAgIkZpbHRlciI6ICIoKHprcmF0a2EpOjp0ZXh0ID0gJ1BTUDgnOjp0ZXh0KSIsCiAgICAgICAgICAgICAgICAgICJSb3dzIFJlbW92ZWQgYnkgRmlsdGVyIjogMTM4OQogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgIF0KICAgICAgICAgICAgfQogICAgICAgICAgXQogICAgICAgIH0sCiAgICAgICAgewogICAgICAgICAgIk5vZGUgVHlwZSI6ICJJbmRleCBTY2FuIiwKICAgICAgICAgICJQYXJlbnQgUmVsYXRpb25zaGlwIjogIklubmVyIiwKICAgICAgICAgICJQYXJhbGxlbCBBd2FyZSI6IGZhbHNlLAogICAgICAgICAgIlNjYW4gRGlyZWN0aW9uIjogIkZvcndhcmQiLAogICAgICAgICAgIkluZGV4IE5hbWUiOiAicHNwX3Bvc2xhbmNpX29zb2J5X2lkX29zb2JhX3VuaXF1ZV9pZHgiLAogICAgICAgICAgIlJlbGF0aW9uIE5hbWUiOiAicG9zbGFuY2lfb3NvYnkiLAogICAgICAgICAgIkFsaWFzIjogIm9zIiwKICAgICAgICAgICJTdGFydHVwIENvc3QiOiAwLjI4LAogICAgICAgICAgIlRvdGFsIENvc3QiOiAwLjMxLAogICAgICAgICAgIlBsYW4gUm93cyI6IDEsCiAgICAgICAgICAiUGxhbiBXaWR0aCI6IDQ0LAogICAgICAgICAgIkFjdHVhbCBTdGFydHVwIFRpbWUiOiAwLjAwMiwKICAgICAgICAgICJBY3R1YWwgVG90YWwgVGltZSI6IDAuMDAyLAogICAgICAgICAgIkFjdHVhbCBSb3dzIjogMSwKICAgICAgICAgICJBY3R1YWwgTG9vcHMiOiAyMTMsCiAgICAgICAgICAiSW5kZXggQ29uZCI6ICIoaWRfb3NvYmEgPSB6YS5pZF9vc29iYSkiLAogICAgICAgICAgIlJvd3MgUmVtb3ZlZCBieSBJbmRleCBSZWNoZWNrIjogMAogICAgICAgIH0KICAgICAgXQogICAgfSwKICAgICJQbGFubmluZyBUaW1lIjogMC40MzcsCiAgICAiVHJpZ2dlcnMiOiBbCiAgICBdLAogICAgIkV4ZWN1dGlvbiBUaW1lIjogOC40OTcKICB9Cl0=';
+        planCode.value = atob(plan);
+        planCode.dispatchEvent(new Event('change'));
+    });
+
+    function renderPlan(planRaw) {
+        document.getElementById('instructions-text').style.display = 'none';
+        if (planRaw.length != 1) {
+            console.error('unexpected plan size: ' + planRaw.length);
+            return; // TODO: UI error
+        }
+        planRaw = planRaw[0];
+        const topNode = planRaw['Plan'];
+
+        var plan = {
+            name: 'Total',
+            // using the top plan, not planRaw['Execution Time'] - why do they differ?
+            value: planRaw['Planning Time'] + topNode['Actual Total Time'],
+            children: [
+                {
+                    name: 'Planning',
+                    value: planRaw['Planning Time'],
+                },
+                parsePlan(topNode),
+            ]
+        }
+
+        const tooltip = d3.tip()
+            .direction("s")
+            .attr('class', 'd3-flame-graph-tip')
+            .html(function(d) {
+                return `${d.data.name} - ${d.data.value} ms`;
+              });
+
+        const flamegraph = d3.flamegraph()
+                           .setDetailsElement(document.getElementById('plan-node-details'))
+                           .label((x) => renderDetails(x.data.detail))
+                           .tooltip(tooltip)
+                           .width(800);
+
+        d3.select("#plan-rendered")
+          .datum(plan)
+          .call(flamegraph);    
+    }
+
+    function parsePlan(node) {
+        let name = node['Node Type']
+        if (node['Relation Name'] && node['Index Name']) {
+            name = `${node['Node Type']} using ${node['Index Name']} on ${node['Relation Name']}`;
+        } else if (node['Relation Name']) {
+            name = `${node['Node Type']} on ${node['Relation Name']}`;
+        }
+
+        let children = [];
+
+        if (node['Plans']) {
+            for (let cnode of node['Plans']) {
+                children.push(parsePlan(cnode));
+            }
+        }
+
+        return {
+            name: name,
+            value: node['Actual Total Time'],
+            children: children,
+            detail: node,
+        }
+    }
+
+    function renderDetails(details) {
+        if (!details) {
+            return // TODO: this refers to e.g. total
+        }
+
+        const exclude = ['Plans', 'Node Type', 'Index Name', 'Relation Name']; // avoid these details
+
+        let container = document.createElement('table');
+        for (let key of Object.keys(details)) {
+            if (exclude.includes(key)) {
+                continue;
+            }
+            let row = document.createElement('tr');
+            let label = document.createElement('th');
+            label.setAttribute('scope', 'row');
+            label.innerText = key;
+            let value = document.createElement('td');
+            value.innerText = details[key];
+
+            row.appendChild(label);
+            row.appendChild(value);
+            container.appendChild(row);
+        }
+        return container.outerHTML;
+    }    
+</script>
+
+</body>
+</html>
+
